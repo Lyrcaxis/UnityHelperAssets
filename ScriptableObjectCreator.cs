@@ -46,7 +46,7 @@ namespace Utilities {
 			path += ".asset";
 
 			Debug.Log($"Create {Name} at: {path}...");
-			if (!ValidatePath(path)) { return; }
+			if (!IsInputValid(path)) { return; }
 
 			var obj = item;
 			AdditionalInitialization(obj);
@@ -70,8 +70,8 @@ namespace Utilities {
 			else { Debug.Log("Last created asset cannot be found."); }
 		}
 
-		#region Path validation Logic
-		bool ValidatePath(string path) {
+		#region Path Validation Logic
+		bool IsInputValid(string path) {
 			if (String.IsNullOrWhiteSpace(SavePath) || !IsStringValid(SavePath, Path.GetInvalidPathChars())) {
 				Debug.Log("Wrong Save Path");
 				return false;
