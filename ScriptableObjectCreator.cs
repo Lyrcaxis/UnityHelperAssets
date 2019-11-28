@@ -33,7 +33,7 @@ namespace Utilities {
 
 
 		[Button, PropertyOrder(99)]
-		void CreateAsset() {
+		protected void CreateAsset() {
 
 			if (!AdditionalValidation()) { return; }
 			string path = "";
@@ -58,12 +58,11 @@ namespace Utilities {
 
 			LastCreatedAsset = obj;
 			OnEnable();
-
 		}
 
 		[SerializeField, HideInInspector] T LastCreatedAsset;
 
-		[Button, PropertyOrder(100)]
+		[Button, PropertyOrder(100), PropertySpace]
 		void GoToLastCreatedAsset() {
 			if (LastCreatedAsset != null) {
 				ProjectWindowUtil.ShowCreatedAsset(LastCreatedAsset);
