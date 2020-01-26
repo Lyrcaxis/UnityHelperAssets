@@ -1,165 +1,10 @@
 using System;
 using Sirenix.OdinInspector;
 using UnityEngine;
-#if UNITY_EDITOR
 using System.Collections.Generic;
+#if UNITY_EDITOR
 using Sirenix.OdinInspector.Editor;
 using UnityEditor;
-
-namespace Sirenix.OdinInspector.CustomProcessors {
-
-	[ResolverPriority(300)]
-	public class InjectPropertyProcessor : OdinPropertyProcessor {
-
-
-		public static List<InspectorPropertyInfo> injectedProperties = new List<InspectorPropertyInfo>();
-
-		public override void ProcessMemberProperties(List<InspectorPropertyInfo> memberInfos) {
-
-			if (Property.Name == "ROOT") { injectedProperties.Clear(); }
-
-			foreach (InspectorPropertyInfo mInfo in memberInfos) {
-				InjectPropertyAttribute attr = mInfo.GetAttribute<InjectPropertyAttribute>();
-				if (attr == null) { continue; }
-
-				attr.SetMemberPath(attr.MemberPath.TrimStart('@'));
-
-				if (attr.MemberPath.Contains(".")) {
-					injectedProperties.Add(mInfo);
-					attr.SetParentProperty(Property);
-				}
-				else {
-					mInfo.GetEditableAttributesList().Add(new OrderRelativeToAttribute(attr.MemberPath));
-					mInfo.GetEditableAttributesList().Remove(attr);
-				}
-			}
-
-
-
-			for (int i = injectedProperties.Count - 1; i >= 0; i--) {
-				InspectorPropertyInfo propInfo = injectedProperties[i];
-				InjectPropertyAttribute attr = propInfo.GetAttribute<InjectPropertyAttribute>();
-
-				bool isValidPath = ValidatePath(attr.MemberPath, out string memberName);
-				if (!isValidPath) { continue; }
-
-				for (int j = 0; i < memberInfos.Count; j++) {
-					InspectorPropertyInfo mInfo = memberInfos[i];
-
-					if (mInfo.PropertyName == memberName) {
-						var newHelperAttr = new InjectPropertyHelperAttribute(propInfo.PropertyName, attr.parentProperty, attr.DrawAboveTarget);
-						mInfo.GetEditableAttributesList().Add(newHelperAttr);
-
-						// Check for existing PropertyOrder attribute on the target field.
-						PropertyOrderAttribute targetsPropertyOrderAttribute = propInfo.GetAttribute<PropertyOrderAttribute>();
-						if (targetsPropertyOrderAttribute != null) {
-							var newPropOrderAttr = new PropertyOrderAttribute(targetsPropertyOrderAttribute.Order);
-							propInfo.GetEditableAttributesList().Add(newPropOrderAttr);
-						}
-
-						attr.MarkAsInitialized();
-						// TODO: Remove this and support lists (??)
-						injectedProperties.Remove(propInfo);
-						break;
-					}
-				}
-			}
-
-		}
-
-		// Climb the path up and see if the property is on the right hierarchy
-		bool ValidatePath(string MemberPath, out string memberName) {
-			memberName = "";
-			string Path = "";
-
-			InspectorProperty _prop = Property;
-			for (int i = 0; i < DotAmount(MemberPath); i++) {
-				Path = $"{_prop.Name}." + Path;
-				_prop = Property.Parent;
-				if (_prop == null) { return false; }
-			}
-
-			if (!MemberPath.Contains(Path)) { return false; }
-			memberName = MemberPath.Replace(Path, "");
-
-			return true;
-		}
-
-		// Probably not the most efficient way but meh
-		int DotAmount(string MemberPath) {
-			int amount = 0;
-			foreach (char c in MemberPath) {
-				if (c == '.') { amount++; }
-			}
-			return amount;
-		}
-
-	}
-	[DrawerPriority(DrawerPriorityLevel.SuperPriority)]
-	public class InjectPropertyDrawerAttributeDrawer : OdinAttributeDrawer<InjectPropertyAttribute> {
-		public static bool ShouldDraw;
-
-		protected override void Initialize() {
-			var attr = Attribute;
-			var hiearchyMembers = attr.MemberPath.Split('.');
-
-			var p = attr.parentProperty;
-			foreach (var member in hiearchyMembers) {
-				var nextProp = p.Children.Get(member);
-				if (nextProp != null) { p = nextProp; }
-				else {
-					Debug.LogError($"Could not find {member} in {p.Path} ");
-					return;
-				}
-			}
-		}
-
-
-		protected override void DrawPropertyLayout(GUIContent label) {
-			if (!Attribute.IsInitialized) {
-				EditorGUILayout.HelpBox($"{Attribute.MemberPath} is not a valid path.", MessageType.Error);
-				CallNextDrawer(label);
-			}
-			else if (ShouldDraw) { CallNextDrawer(label); }
-		}
-	}
-
-	[DrawerPriority(DrawerPriorityLevel.SuperPriority)]
-	public class InjectPropertyHelperAttributeDrawer : OdinAttributeDrawer<InjectPropertyHelperAttribute> {
-
-		protected override void DrawPropertyLayout(GUIContent label) {
-
-			if (!Attribute.DrawTargetBefore) { CallNextDrawer(label); }
-
-			DrawInjectedProperty();
-
-			if (Attribute.DrawTargetBefore) { CallNextDrawer(label); }
-
-		}
-
-		void DrawInjectedProperty() {
-			InjectPropertyDrawerAttributeDrawer.ShouldDraw = true;
-			{
-				InspectorProperty Prop = Attribute.parentProperty.Children.Get(Attribute.Member);
-				Prop.Draw();
-			}
-			InjectPropertyDrawerAttributeDrawer.ShouldDraw = false;
-		}
-	}
-
-	public class InjectPropertyHelperAttribute : ShowInInspectorAttribute {
-		public InspectorProperty parentProperty;
-		public bool DrawTargetBefore;
-		public string Member;
-
-		public InjectPropertyHelperAttribute(string MemberName, InspectorProperty prop, bool ShouldDrawBefore) {
-			Member = MemberName;
-			parentProperty = prop;
-			DrawTargetBefore = ShouldDrawBefore;
-		}
-	}
-
-}
 #endif
 
 /// <summary>
@@ -190,3 +35,133 @@ public class InjectPropertyAttribute : ShowInInspectorAttribute {
 		this.DrawAboveTarget = DrawAboveTarget;
 	}
 }
+
+#if UNITY_EDITOR
+namespace Sirenix.OdinInspector.CustomProcessors {
+
+	// Helper attribute to be attached to the target of InjectPropertyAttribute.
+	class InjectHelperAttribute : Attribute {
+		public InspectorProperty targetProperty;
+
+		public bool DrawTargetPropertyFirst;
+
+		public InjectHelperAttribute(InspectorProperty target, bool DrawTargetFirst) {
+			targetProperty = target;
+			DrawTargetPropertyFirst = DrawTargetFirst;
+		}
+	}
+
+	// Hey, if it works, it works :)
+	[ResolverPriority(-10000)]
+	class InjectorHack : OdinPropertyProcessor {
+		public static List<InjectorHackHelper> ToProcessList = new List<InjectorHackHelper>(100);
+
+		public override void ProcessMemberProperties(List<InspectorPropertyInfo> propertyInfos) {
+			foreach (InspectorPropertyInfo pInfo in propertyInfos) {
+				foreach (InjectorHackHelper item in ToProcessList) {
+					if (item.info.GetMemberInfo() != pInfo.GetMemberInfo()) { continue; }
+					pInfo.GetEditableAttributesList().Add(item.attr);
+					ToProcessList.Remove(item);
+					break;
+				}
+			}
+		}
+		internal class InjectorHackHelper {
+			public InspectorPropertyInfo info;
+			public InjectHelperAttribute attr;
+		}
+	}
+
+	// Draws the original drawer on the specified member of the InjectPropertyAttribute.
+	[DrawerPriority(super: 1000)]
+	class InjectedPropertyDrawer : OdinAttributeDrawer<InjectHelperAttribute> {
+
+		protected override void DrawPropertyLayout(GUIContent label) {
+			if (!Attribute.DrawTargetPropertyFirst) { CallNextDrawer(label); }
+			DrawInjectedProperty();
+			if (Attribute.DrawTargetPropertyFirst) { CallNextDrawer(label); }
+		}
+
+		void DrawInjectedProperty() {
+			InjectDrawer.ShouldDraw = true;
+			{
+				//InjectDrawer.Draw(Attribute.targetProperty);
+				try { Attribute.targetProperty.Draw(); }
+				catch { Debug.LogError("Error drawing property."); }
+			}
+			InjectDrawer.ShouldDraw = false;
+		}
+	}
+
+	// The original drawer of the InjectPropertyAttribute.
+	// Skips drawing initially and can drawn on demand with ShouldDraw.
+	[DrawerPriority(super: 999)]
+	class InjectDrawer : OdinAttributeDrawer<InjectPropertyAttribute> {
+		public static bool ShouldDraw;
+		public static bool SkipFrame;
+
+		// Validating here because it's impossible to scan down the hierarchy from Property or Attribute Processors.
+		protected override void Initialize() {
+			string result = Validate(Property, Attribute);
+			if (result != "Success") { Debug.LogError(result); }
+		}
+
+		protected override void DrawPropertyLayout(GUIContent label) {
+			if (!Attribute.IsInitialized) {
+				EditorGUILayout.HelpBox($"{Attribute.MemberPath} is not a valid path.", MessageType.Error);
+				CallNextDrawer(label);
+			}
+			else if (SkipFrame) { SkipFrame = false; }
+			else if (ShouldDraw) { CallNextDrawer(label); }
+		}
+
+		#region Validation
+		string Validate(InspectorProperty Property, InjectPropertyAttribute attr) {
+			if (!Property.IsReachableFromRoot()) { Debug.LogError($"{Property.Name} is not valid target for {attr}"); }
+
+			string[] hiearchyMembers = GetFullHierarchyPath(Property, attr).Split('.');
+
+			bool parentInitialized = false;
+			InspectorProperty p = Property.SerializationRoot;
+
+			foreach (string member in hiearchyMembers) {
+
+				if (!parentInitialized) { if (IsParent(Property, p)) { attr.SetParentProperty(p); parentInitialized = true; } }
+
+				InspectorProperty nextProp = p.Children.Get(member);
+				if (nextProp != null) { p = nextProp; }
+				else { return $"Could not find {member} in {p.Path}."; }
+			}
+
+			if (!parentInitialized) { return $"Parent not found for {Property.Name}."; }
+
+			var newAttr = new InjectHelperAttribute(Property, attr.DrawAboveTarget);
+			InjectorHack.ToProcessList.Add(new InjectorHack.InjectorHackHelper() { info = p.Info, attr = newAttr });
+			p.Parent.RefreshSetup();
+
+			attr.MarkAsInitialized();
+			SkipFrame = true;
+			return "Success";
+		}
+
+
+		string GetFullHierarchyPath(InspectorProperty Property, InjectPropertyAttribute attr) {
+			string path = attr.MemberPath.TrimStart('@');
+			if (Property.Path.Contains(".")) {
+				string subStr = Property.Path.Substring(0, Property.Path.LastIndexOf('.'));
+				path = subStr + "." + path;
+			}
+			return path;
+		}
+
+		bool IsParent(InspectorProperty Property, InspectorProperty CheckIfParent) {
+			foreach (InspectorProperty item in CheckIfParent.Children) {
+				if (item.Path == Property.Path) { return true; }
+			}
+			return false;
+		}
+		#endregion
+	}
+
+}
+#endif
