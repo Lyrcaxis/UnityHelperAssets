@@ -72,11 +72,11 @@ namespace Utilities {
 
 		#region Path Validation Logic
 		bool IsInputValid(string path) {
-			if (String.IsNullOrWhiteSpace(SavePath) || !IsStringValid(SavePath, Path.GetInvalidPathChars())) {
+			if (!IsStringValid(SavePath, Path.GetInvalidPathChars())) {
 				Debug.Log("Wrong Save Path");
 				return false;
 			}
-			if (String.IsNullOrWhiteSpace(Name) || !IsStringValid(Name, Path.GetInvalidFileNameChars())) {
+			if (!IsStringValid(Name, Path.GetInvalidFileNameChars())) {
 				Debug.Log("Wrong Name");
 				return false;
 			}
@@ -93,6 +93,8 @@ namespace Utilities {
 		}
 
 		bool IsStringValid(string s, char[] invalidCharacters) {
+			if (String.IsNullOrWhiteSpace(s)) {return false; }
+			
 			foreach (var character in invalidCharacters) {
 				if (s.Contains(character.ToString())) {
 					Debug.Log(character);
