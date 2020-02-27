@@ -73,7 +73,7 @@ public class OrderRelativeToAttribute : ShowInInspectorAttribute {
 	/// Draws a property in an order relative to a member.
 	/// </summary>
 	/// <param name="MemberName">The name of the member to which this property's ordering will be adjusted relatively.</param>
-	/// <param name="AdditionalOrder">Optional value for adjusting </param>
+	/// <param name="AdditionalOrder">The relative position of the property (-9 to 9).</param>
 	public OrderRelativeToAttribute(string MemberName, int AdditionalOrder) {
 		Member = MemberName;
 		#if UNITY_EDITOR
